@@ -1,29 +1,7 @@
 import subprocess
 import requests
-import pytz, calendar
+import pytz, calendar, time
 from datetime import datetime
-
-# def send_msg(user, msg):
-#     # subprocess.call([
-#     #     'curl',
-#     #     'https://wx.qq.com/cgi-bin/mmwebwx-bin/webwxsendmsg?lang=en',
-#     #     '-H','Pragma: no-cache',
-#     #     '-H','Origin: https://wx.qq.com',
-#     #     '-H','Accept-Encoding: gzip, deflate',
-#     #     '-H','Accept-Language: en-GB,en-US;q=0.8,en;q=0.6,it;q=0.4,zh-CN;q=0.2,zh-TW;q=0.2',
-#     #     '-H','User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Ubuntu Chromium/45.0.2454.85 Chrome/45.0.2454.85 Safari/537.36',
-#     #     '-H','Content-Type: application/json;charset=UTF-8',
-#     #     '-H','Accept: application/json, text/plain, */*',
-#     #     '-H','Cache-Control: no-cache',
-#     #     '-H','Referer: https://wx.qq.com/?&lang=en',
-#     #     '-H','Cookie: pgv_pvi=527265792; pgv_si=s4686718976; webwxuvid=41149120bbcb969003f03a6570e9d825415744f2855360e73cd06ec38bd4d4dd5e79f37df5a8a75e6dd6f555d770f2a1; pgv_info=ssid=s2492421533; pgv_pvid=6972363959; pt_clientip=fe2e7f0000015683; pt_serverip=f41e0af17164240f; mm_lang=en; MM_WX_NOTIFY_STATE=1; MM_WX_SOUND_STATE=1; wxpluginkey=1449142753; wxuin=300781955; wxsid=HVTz77loQGRIylWs; webwx_data_ticket=AQacPwS+o07YAaQ8OVi6OwLJ',
-#     #     '-H','Connection: keep-alive',
-#     #     '--data-binary',
-#     #     '$\'{"BaseRequest":{"Uin":300781955,"Sid":"HVTz77loQGRIylWs","Skey":"@crypt_c39a9d8a_29735d46464e289c60d22e867baecd68","DeviceID":"e368943473324180"},"Msg":{"Type":1,"Content":"'+msg+'","FromUserName":"@44052695e3776afd39c1e0a86da623be","ToUserName":"@4713352c6663bca8550b62447b1d731e9600961dbba9f3b5a95e85e3765273a1","LocalID":"14491525566330008","ClientMsgId":"14491525566330008"}}\'',
-#     #     '--compressed'])
-#     subprocess.call(['curl',' \'https://wx.qq.com/cgi-bin/mmwebwx-bin/webwxsendmsg?lang=en\' -H \'Pragma: no-cache\' -H \'Origin: https://wx.qq.com\' -H \'Accept-Encoding: gzip, deflate\' -H \'Accept-Language: en-GB,en-US;q=0.8,en;q=0.6,it;q=0.4,zh-CN;q=0.2,zh-TW;q=0.2\' -H \'User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Ubuntu Chromium/45.0.2454.85 Chrome/45.0.2454.85 Safari/537.36\' -H \'Content-Type: application/json;charset=UTF-8\' -H \'Accept: application/json, text/plain, */*\' -H \'Cache-Control: no-cache\' -H \'Referer: https://wx.qq.com/?&lang=en\' -H \'Cookie: pgv_pvi=527265792; pgv_si=s4686718976; webwxuvid=41149120bbcb969003f03a6570e9d825415744f2855360e73cd06ec38bd4d4dd5e79f37df5a8a75e6dd6f555d770f2a1; pgv_info=ssid=s2492421533; pgv_pvid=6972363959; pt_clientip=fe2e7f0000015683; pt_serverip=f41e0af17164240f; mm_lang=en; MM_WX_NOTIFY_STATE=1; MM_WX_SOUND_STATE=1; wxpluginkey=1449142753; wxuin=300781955; wxsid=HVTz77loQGRIylWs; webwx_data_ticket=AQacPwS+o07YAaQ8OVi6OwLJ\' -H \'Connection: keep-alive\' --data-binary $\'{"BaseRequest":{"Uin":300781955,"Sid":"HVTz77loQGRIylWs","Skey":"@crypt_c39a9d8a_29735d46464e289c60d22e867baecd68","DeviceID":"e368943473324180"},"Msg":{"Type":1,"Content":"\u8001\u5a46\u4e56\uff5e","FromUserName":"@44052695e3776afd39c1e0a86da623be","ToUserName":"@4713352c6663bca8550b62447b1d731e9600961dbba9f3b5a95e85e3765273a1","LocalID":"14491525566330008","ClientMsgId":"14491525566330008"}}\' --compressed'])
-#
-# /jslogin?appid=wx782c26e4c19acffb&redirect_uri=https%3A%2F%2Fwx.qq.com%2Fcgi-bin%2Fmmwebwx-bin%2Fwebwxnewloginpage&fun=new&lang=en_GB&_=1449166664291
 
 class WXBot(object):
 
@@ -39,7 +17,7 @@ class WXBot(object):
 
         self._hrefWXGetContacts = 'https://wx.qq.com/cgi-bin/mmwebwx-bin/webwxgetcontact?lang=en_GB&pass_ticket={}&r={}&skey={}'
 
-        self._hrefSynccheck =  'https://webpush.weixin.qq.com/cgi-bin/mmwebwx-bin/synccheck?r={}&skey={}&sid={}&deviceid={}&synckey={}'
+        self._hrefSynccheck =  'https://webpush.weixin.qq.com/cgi-bin/mmwebwx-bin/synccheck?r={}&skey={}&sid={}&uin={}&deviceid={}&synckey={}&_={}'
 
         self._hrefWebwxsync = 'https://wx.qq.com/cgi-bin/mmwebwx-bin/webwxsync?sid={}&skey={}&lang=en_GB&pass_ticket={}'
 
@@ -89,44 +67,54 @@ class WXBot(object):
                 ['{}_{}'.format(k['Key'], k['Val']) for k in self.synckey]
             )
 
-        response = self.session.get(self._hrefSynccheck.format(
+        str_request =  self._hrefSynccheck.format(
             self._get_unix_timestamp(),
             self.skey,
             self.wxsid,
+            self.wxuin,
             self.deviceID,
-            format_synckey()
-        ))
+            format_synckey(),
+            self._get_unix_timestamp()
+        )
+
+        response = self.session.get(str_request)
 
         selector = self._find_between(response.text,'selector:"','"}')
 
-        if selector is '0':
-            # increment key 1000 by 1
-            for k in self.synckey:
-                if k['Key'] == 1000:
-                    k['Val'] += 1
+        print 'Sync Check Done:'
+        print selector
+        print response.text
+
+        if selector == "0" or selector == 0:
+            print 'Status Idel'
         else:
             # Get New Messages
-            data = {
-                "BaseRequest":{
-                    "Uin": self.wxuin,
-                    "Sid": self.wxsid,
-                    "Skey": self.skey,
-                    "DeviceID": self.deviceID
-                },"SyncKey":{
-                    "Count":len(self.synckey),
-                    "List":self.synckey
-                },"rr":-1851102809
-            }
+            print self.request_get_update()
 
-            response = self.session.post(self._hrefWebwxsync.format(
-                self.wxsid,
-                self.skey,
-                self.pass_ticket
-            ), json=data)
+    def request_get_update(self):
+        data = {
+            "BaseRequest":{
+                "Uin": self.wxuin,
+                "Sid": self.wxsid,
+                "Skey": self.skey,
+                "DeviceID": self.deviceID
+            },"SyncKey":{
+                "Count":len(self.synckey),
+                "List":self.synckey
+            },"rr":-1851102809
+        }
 
-            print 'Message Recieved:'
-            print response.json()
+        response = self.session.post(self._hrefWebwxsync.format(
+            self.wxsid,
+            self.skey,
+            self.pass_ticket
+        ), json=data)
 
+        print 'Message Recieved:'
+        data = response.json()
+
+        self.synckey = data['SyncKey']['List']
+        return data
 
     def request_login(self):
         while(not self.isLoggedIn):
@@ -138,11 +126,16 @@ class WXBot(object):
 
             # wait for scan
             while(not self.isLoggedIn):
-                response = self.session.get(
-                    self._herfScanFormat.format(
-                        self.uuid, self._get_unix_timestamp()
+                response = None
+                try:
+                    response = self.session.get(
+                        self._herfScanFormat.format(
+                            self.uuid, self._get_unix_timestamp()
+                        )
                     )
-                )
+                except:
+                    break
+
                 line = response.text
                 code = self._find_between(line, 'window.code=', ';')
                 if code == "408":
@@ -183,14 +176,14 @@ class WXBot(object):
                         self._herfWXInit.format(self.pass_ticket),
                         json=data
                     )
-                    print response.text
+
                     self.init_info = response.json()
 
                     if not self.init_info['BaseResponse']['Ret'] == 0:
                         print 'Failed to init with server. Retrying...'
                         break
 
-                    self.synckey = data['SyncKey']['List']
+                    self.synckey = self.init_info['SyncKey']['List']
 
                     self.isLoggedIn = True
                     print 'Logged In as ' + self.init_info['User']['NickName']
@@ -201,6 +194,9 @@ class WXBot(object):
 
     def run(self):
         self.request_login()
+        while True:
+            self.request_synccheck()
+            time.sleep(20)
 
     def _get_unix_timestamp(self, time_zone='UTC'):
         dt = datetime.now()
