@@ -49,11 +49,12 @@ class WXBot(object):
         self.session.headers.update(self.headers)
 
     def request_get_contacts(self):
-        response = self.session.get(self._hrefWXGetContacts.format(
+        response = wxGet(self.session, self._hrefWXGetContacts.format(
             self.pass_ticket,
             self._get_unix_timestamp(),
             self.skey
         ))
+
         data = response.json()
         if data['BaseResponse']['Ret'] == 0:
             self.contacts = data['MemberList']
@@ -77,7 +78,7 @@ class WXBot(object):
             self._get_unix_timestamp()
         )
 
-        response = self.session.get(str_request)
+        response = wxGet(self.session, str_request)
 
         selector = self._find_between(response.text,'selector:"','"}')
 
@@ -104,11 +105,11 @@ class WXBot(object):
             },"rr":-1851102809
         }
 
-        response = self.session.post(self._hrefWebwxsync.format(
+        response = wxPost(self.session, self._hrefWebwxsync.format(
             self.wxsid,
             self.skey,
             self.pass_ticket
-        ), json=data)
+        ), data=data)
 
         print 'Message Recieved:'
         data = response.json()
@@ -118,7 +119,8 @@ class WXBot(object):
 
     def request_login(self):
         while(not self.isLoggedIn):
-            response = self.session.get(self._hrefLoginFormat.format(self._get_unix_timestamp()))
+
+            response = wxGet(self.session, self._hrefLoginFormat.format(self._get_unix_timestamp()))
 
             self.uuid = self._find_between(response.text,'uuid = \"',"\";")
 
@@ -126,14 +128,11 @@ class WXBot(object):
 
             # wait for scan
             while(not self.isLoggedIn):
-                response = None
-                try:
-                    response = self.session.get(
-                        self._herfScanFormat.format(
-                            self.uuid, self._get_unix_timestamp()
-                        )
-                    )
-                except:
+                response = wxGet(self.session, self._herfScanFormat.format(
+                    self.uuid, self._get_unix_timestamp()
+                ))
+
+                if not response:
                     break
 
                 line = response.text
@@ -152,7 +151,7 @@ class WXBot(object):
                     ) + '&fun=new&version=v2&lang=en_GB'
 
                     # Request confidential information
-                    response = self.session.get(urlredirect)
+                    response = wxGet(self.session, urlredirect)
                     retCode = self._find_between(response.text, '<ret>', '</ret>')
                     self.skey = self._find_between(response.text, '<skey>', '</skey>')
                     self.wxsid = self._find_between(response.text, '<wxsid>', '</wxsid>')
@@ -172,9 +171,8 @@ class WXBot(object):
                     data['BaseRequest']['Skey'] = self.skey
                     data['BaseRequest']['Uin'] = self.wxuin
 
-                    response = self.session.post(
-                        self._herfWXInit.format(self.pass_ticket),
-                        json=data
+                    response = wxPost(
+                        self.session, self._herfWXInit.format(self.pass_ticket), data=data
                     )
 
                     self.init_info = response.json()
@@ -196,7 +194,6 @@ class WXBot(object):
         self.request_login()
         while True:
             self.request_synccheck()
-            time.sleep(20)
 
     def _get_unix_timestamp(self, time_zone='UTC'):
         dt = datetime.now()
@@ -211,6 +208,31 @@ class WXBot(object):
             return s[start:end]
         except ValueError:
             return ""
+
+
+def wxPost(session, url, data=None, retry=10):
+    resp = None
+    while not resp and retry > 0:
+        try:
+            print 'Request Post: {}'.format(url)
+            resp = session.post(url, json=data)
+        except Exception as e:
+            print e
+
+        retry -= 1
+    return resp
+
+def wxGet(session, url, retry=10):
+    resp = None
+    while not resp and retry > 0:
+        try:
+            print 'Request Get: {}'.format(url)
+            resp = session.get(url)
+        except Exception as e:
+            print e
+
+        retry -= 1
+    return resp
 
 
 if __name__ == '__main__':
