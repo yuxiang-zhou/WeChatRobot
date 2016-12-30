@@ -1,25 +1,27 @@
 import subprocess
 import requests
-import pytz, calendar, time
+import pytz, calendar, time, threading, json
 from datetime import datetime
 
 class WXBot(object):
 
-    def __init__(self):
+    def __init__(self, verbose=False):
         # Predefine request strings
         self._hrefLoginFormat = 'https://wx.qq.com/jslogin?appid=wx782c26e4c19acffb&redirect_uri=https%3A%2F%2Fwx.qq.com%2Fcgi-bin%2Fmmwebwx-bin%2Fwebwxnewloginpage&fun=new&lang=en_GB&_={}'
 
         self._hrefQRCodeFormat = 'https://login.weixin.qq.com/qrcode/{}'
 
-        self._herfScanFormat = 'https://login.weixin.qq.com/cgi-bin/mmwebwx-bin/login?loginicon=true&uuid={}&tip=0&r=-1832847261&_={}'
+        self._herfScanFormat = 'https://login.weixin.qq.com/cgi-bin/mmwebwx-bin/login?loginicon=true&uuid={}&tip=0&r={}&_={}'
 
-        self._herfWXInit = 'https://wx.qq.com/cgi-bin/mmwebwx-bin/webwxinit?r=-1832847261&lang=en_GB&pass_ticket={}'
+        self._herfWXInit = 'https://wx.qq.com/cgi-bin/mmwebwx-bin/webwxinit?r={}&lang=en_GB&pass_ticket={}'
 
         self._hrefWXGetContacts = 'https://wx.qq.com/cgi-bin/mmwebwx-bin/webwxgetcontact?lang=en_GB&pass_ticket={}&r={}&skey={}'
 
         self._hrefSynccheck =  'https://webpush.weixin.qq.com/cgi-bin/mmwebwx-bin/synccheck?r={}&skey={}&sid={}&uin={}&deviceid={}&synckey={}&_={}'
 
         self._hrefWebwxsync = 'https://wx.qq.com/cgi-bin/mmwebwx-bin/webwxsync?sid={}&skey={}&lang=en_GB&pass_ticket={}'
+
+        self._hrefSendMessage = 'https://wx.qq.com/cgi-bin/mmwebwx-bin/webwxsendmsg?lang=en_GB&pass_ticket={}'
 
         # Header Settings
         self.headers = {
@@ -35,6 +37,7 @@ class WXBot(object):
 
         # global variables
         self.isLoggedIn = False
+        self.isRunning = False
         self.uuid = ""
         self.skey = ""
         self.wxsid = ""
@@ -43,12 +46,35 @@ class WXBot(object):
         self.pass_ticket = ""
         self.contacts = []
         self.synckey = []
-
+        self.init_info = {}
+        self._verbose = verbose
+        self._listeners = {}
         # Session Management
         self.session = requests.Session()
         self.session.headers.update(self.headers)
 
-    def request_get_contacts(self):
+    # helper functions
+    def _get_unix_timestamp(self, time_zone='UTC'):
+        dt = datetime.now()
+        tz = pytz.timezone(time_zone)
+        utc_dt = tz.localize(dt, is_dst=True).astimezone(pytz.utc)
+        return calendar.timegm(utc_dt.timetuple())
+
+    def _find_between(self, s, first, last ):
+        try:
+            start = s.index( first ) + len( first )
+            end = s.index( last, start )
+            return s[start:end]
+        except ValueError:
+            return ""
+
+    def _fire_event(self, event, args):
+        if self._listeners.has_key(event):
+            for func in self._listeners[event]:
+                func(args)
+
+    # request hendler
+    def _request_get_contacts(self):
         response = wxGet(self.session, self._hrefWXGetContacts.format(
             self.pass_ticket,
             self._get_unix_timestamp(),
@@ -61,7 +87,7 @@ class WXBot(object):
         else:
             print 'Failed to get contacts list.'
 
-    def request_synccheck(self):
+    def _request_synccheck(self):
 
         def format_synckey():
             return '%7C'.join(
@@ -80,19 +106,23 @@ class WXBot(object):
 
         response = wxGet(self.session, str_request)
 
+        retcode = self._find_between(response.text,'retcode:"','"')
         selector = self._find_between(response.text,'selector:"','"}')
 
         print 'Sync Check Done:'
-        print selector
         print response.text
+
+        if not retcode == "0" and not retcode == 0:
+            self.isLoggedIn = False
 
         if selector == "0" or selector == 0:
             print 'Status Idel'
         else:
             # Get New Messages
-            print self.request_get_update()
+            self._request_get_update()
 
-    def request_get_update(self):
+    def _request_get_update(self):
+        # Send request for update
         data = {
             "BaseRequest":{
                 "Uin": self.wxuin,
@@ -102,7 +132,7 @@ class WXBot(object):
             },"SyncKey":{
                 "Count":len(self.synckey),
                 "List":self.synckey
-            },"rr":-1851102809
+            },"rr":self._get_unix_timestamp()
         }
 
         response = wxPost(self.session, self._hrefWebwxsync.format(
@@ -111,13 +141,29 @@ class WXBot(object):
             self.pass_ticket
         ), data=data)
 
-        print 'Message Recieved:'
+        if self._verbose:
+            print 'Message Recieved:'
+
         data = response.json()
-
         self.synckey = data['SyncKey']['List']
-        return data
 
-    def request_login(self):
+        # parse data
+        msglist = data['AddMsgList']
+        for msg in msglist:
+            if self._verbose:
+                print '({}){}-{}:{}'.format(
+                    msg['MsgType'],
+                    msg['FromUserName'],
+                    msg['ToUserName'],
+                    msg['Content'].encode('raw_unicode_escape')
+                )
+
+            # fire event
+            # if msg['MsgType'] == 1:
+            self._fire_event('onmessage', msg)
+
+
+    def _request_login(self):
         while(not self.isLoggedIn):
 
             response = wxGet(self.session, self._hrefLoginFormat.format(self._get_unix_timestamp()))
@@ -129,7 +175,7 @@ class WXBot(object):
             # wait for scan
             while(not self.isLoggedIn):
                 response = wxGet(self.session, self._herfScanFormat.format(
-                    self.uuid, self._get_unix_timestamp()
+                    self.uuid, self._get_unix_timestamp(),self._get_unix_timestamp()
                 ))
 
                 if not response:
@@ -161,8 +207,9 @@ class WXBot(object):
                     if not retCode == '0':
                         break
 
-                    print 'Confidential Info Retrieved:'
-                    print self.skey, self.wxsid, self.wxuin, self.pass_ticket
+                    if self._verbose:
+                        print 'Confidential Info Retrieved:'
+                        print self.skey, self.wxsid, self.wxuin, self.pass_ticket
 
                     data = {}
                     data['BaseRequest'] = {}
@@ -172,7 +219,10 @@ class WXBot(object):
                     data['BaseRequest']['Uin'] = self.wxuin
 
                     response = wxPost(
-                        self.session, self._herfWXInit.format(self.pass_ticket), data=data
+                        self.session, self._herfWXInit.format(
+                            self._get_unix_timestamp(),
+                            self.pass_ticket
+                        ), data=data
                     )
 
                     self.init_info = response.json()
@@ -184,50 +234,98 @@ class WXBot(object):
                     self.synckey = self.init_info['SyncKey']['List']
 
                     self.isLoggedIn = True
-                    print 'Logged In as ' + self.init_info['User']['NickName']
+                    print 'Logged In as ' + self.init_info['User']['NickName'].encode('raw_unicode_escape')
                 else:
                     print line
                     print 'Login Failed, Retrying...'
                     break
 
+    # Public Functions
     def run(self):
-        self.request_login()
-        while True:
-            self.request_synccheck()
+        self.isRunning = True
+        while self.isRunning:
+            self._request_login()
+            self._request_get_contacts()
+            while self.isLoggedIn:
+                self._request_synccheck()
+                self._fire_event('onsync', {})
 
-    def _get_unix_timestamp(self, time_zone='UTC'):
-        dt = datetime.now()
-        tz = pytz.timezone(time_zone)
-        utc_dt = tz.localize(dt, is_dst=True).astimezone(pytz.utc)
-        return calendar.timegm(utc_dt.timetuple())
+    def getUserInfo(self, id):
+        info = {}
 
-    def _find_between(self, s, first, last ):
-        try:
-            start = s.index( first ) + len( first )
-            end = s.index( last, start )
-            return s[start:end]
-        except ValueError:
-            return ""
+        if self.contacts:
+            for c in self.contacts:
+                if c['UserName'] == id:
+                    info = c
+                    return info
+
+        if self.init_info and self.init_info['ContactList']:
+            for c in self.init_info['ContactList']:
+                if c['UserName'] == id:
+                    info = c
+                    return info
+
+        return info
+
+    def sendMessage(self, toUser, content):
+        data = {
+            "BaseRequest":{
+                "Uin": self.wxuin,
+                "Sid": self.wxsid,
+                "Skey": self.skey,
+                "DeviceID": self.deviceID
+            },"Msg":{
+                "Type":1,
+                "Content":content,
+                "FromUserName":self.init_info['User']['UserName'],
+                "ToUserName":toUser,
+                "LocalID":self._get_unix_timestamp(),
+                "ClientMsgId":self._get_unix_timestamp()
+            }
+        }
+
+        response = wxPost(self.session, self._hrefSendMessage.format(
+            self.pass_ticket
+        ), payload=json.dumps(data).decode('raw_unicode_escape').encode('utf8'))
+
+        if self._verbose:
+            print 'Message Sent'
+
+        resp = response.json()
+
+        print resp
+        return resp
 
 
-def wxPost(session, url, data=None, retry=10):
+    def addListener(self, event, func):
+        if not self._listeners.has_key(event):
+            self._listeners[event] = []
+        self._listeners[event].append(func)
+
+def wxPost(session, url, data=None, retry=10, timeout=120, payload=None, verbose=False):
     resp = None
     while not resp and retry > 0:
         try:
-            print 'Request Post: {}'.format(url)
-            resp = session.post(url, json=data)
+            if verbose:
+                print 'Request Post: {}'.format(url)
+
+            if data:
+                resp = session.post(url, json=data, timeout=timeout)
+            else:
+                resp = session.post(url, data=payload, timeout=timeout)
         except Exception as e:
             print e
 
         retry -= 1
     return resp
 
-def wxGet(session, url, retry=10):
+def wxGet(session, url, retry=10, timeout=120,verbose=False):
     resp = None
     while not resp and retry > 0:
         try:
-            print 'Request Get: {}'.format(url)
-            resp = session.get(url)
+            if verbose:
+                print 'Request Get: {}'.format(url)
+            resp = session.get(url, timeout=timeout)
         except Exception as e:
             print e
 
@@ -236,5 +334,10 @@ def wxGet(session, url, retry=10):
 
 
 if __name__ == '__main__':
+    print 'Runing from PyWX Module'
+    import sys
+    reload(sys)
+    sys.setdefaultencoding('utf-8')
+
     bot = WXBot()
     bot.run()
