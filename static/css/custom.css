@@ -1,0 +1,10 @@
+#main_container {
+  padding-top: 60px;
+}
+
+.column_container {
+  min-height: 600px;
+  background-color: #AAA;
+  height: 600px;
+  border: 1px solid;
+}

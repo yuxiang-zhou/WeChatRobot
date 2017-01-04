@@ -17,7 +17,7 @@ class WXBot(object):
 
         self._hrefWXGetContacts = 'https://wx.qq.com/cgi-bin/mmwebwx-bin/webwxgetcontact?lang=en_GB&pass_ticket={}&r={}&skey={}'
 
-        self._hrefSynccheck =  'https://webpush.weixin.qq.com/cgi-bin/mmwebwx-bin/synccheck?r={}&skey={}&sid={}&uin={}&deviceid={}&synckey={}&_={}'
+        self._hrefSynccheck =  'https://webpush.wx.qq.com/cgi-bin/mmwebwx-bin/synccheck?r={}&skey={}&sid={}&uin={}&deviceid={}&synckey={}&_={}'
 
         self._hrefWebwxsync = 'https://wx.qq.com/cgi-bin/mmwebwx-bin/webwxsync?sid={}&skey={}&lang=en_GB&pass_ticket={}'
 
@@ -38,11 +38,13 @@ class WXBot(object):
         # global variables
         self.isLoggedIn = False
         self.isRunning = False
+        self.status = 0
+        self.avatar = ""
         self.uuid = ""
         self.skey = ""
         self.wxsid = ""
         self.wxuin = ""
-        self.deviceID = 'e048677534097806'
+        self.deviceID = 'e690869071029209'
         self.pass_ticket = ""
         self.contacts = []
         self.synckey = []
@@ -69,7 +71,7 @@ class WXBot(object):
             return ""
 
     def _fire_event(self, event, args):
-        if self._listeners.has_key(event):
+        if event in self._listeners:
             for func in self._listeners[event]:
                 func(args)
 
@@ -85,7 +87,7 @@ class WXBot(object):
         if data['BaseResponse']['Ret'] == 0:
             self.contacts = data['MemberList']
         else:
-            print 'Failed to get contacts list.'
+            print ('Failed to get contacts list.')
 
     def _request_synccheck(self):
 
@@ -106,20 +108,23 @@ class WXBot(object):
 
         response = wxGet(self.session, str_request)
 
-        retcode = self._find_between(response.text,'retcode:"','"')
-        selector = self._find_between(response.text,'selector:"','"}')
+        retcode = int(self._find_between(response.text,'retcode:"','"'))
+        selector = int(self._find_between(response.text,'selector:"','"}'))
 
-        print 'Sync Check Done:'
-        print response.text
+        print ('Sync Check Done:')
+        print (response.text)
 
-        if not retcode == "0" and not retcode == 0:
+        if not retcode == 0:
             self.isLoggedIn = False
+            self.status = 0
+            return
 
-        if selector == "0" or selector == 0:
-            print 'Status Idel'
+        if selector == 0:
+            print ('Status Idel')
         else:
             # Get New Messages
-            self._request_get_update()
+            if selector == 6:
+                self._request_get_update()
 
     def _request_get_update(self):
         # Send request for update
@@ -142,7 +147,7 @@ class WXBot(object):
         ), data=data)
 
         if self._verbose:
-            print 'Message Recieved:'
+            print ('Message Recieved:')
 
         data = response.json()
         self.synckey = data['SyncKey']['List']
@@ -151,17 +156,16 @@ class WXBot(object):
         msglist = data['AddMsgList']
         for msg in msglist:
             if self._verbose:
-                print '({}){}-{}:{}'.format(
+                print ('({}){}-{}:{}'.format(
                     msg['MsgType'],
                     msg['FromUserName'],
                     msg['ToUserName'],
-                    msg['Content'].encode('raw_unicode_escape')
-                )
+                    msg['Content'].encode('raw_unicode_escape').decode('utf8')
+                ))
 
             # fire event
             # if msg['MsgType'] == 1:
             self._fire_event('onmessage', msg)
-
 
     def _request_login(self):
         while(not self.isLoggedIn):
@@ -169,9 +173,9 @@ class WXBot(object):
             response = wxGet(self.session, self._hrefLoginFormat.format(self._get_unix_timestamp()))
 
             self.uuid = self._find_between(response.text,'uuid = \"',"\";")
+            self.hrefQR = self._hrefQRCodeFormat.format(self.uuid)
 
-            print self._hrefQRCodeFormat.format(self.uuid)
-
+            print (self.hrefQR)
             # wait for scan
             while(not self.isLoggedIn):
                 response = wxGet(self.session, self._herfScanFormat.format(
@@ -184,11 +188,15 @@ class WXBot(object):
                 line = response.text
                 code = self._find_between(line, 'window.code=', ';')
                 if code == "408":
-                    print "Please Scan QR Code"
+                    self.status = 0
+                    print ("Please Scan QR Code")
                 elif code == '201':
-                    print "Please accept login on your phone"
+                    self.status = 1
+                    self.avatar = self._find_between(line.replace(' ',''), "window.userAvatar='", "';")
+                    print ("Please accept login on your phone")
                 elif code == '200':
-                    print 'Initialising...'
+                    self.status = 2
+                    print ('Initialising...')
 
                     urlredirect = self._find_between(
                         line,
@@ -208,8 +216,8 @@ class WXBot(object):
                         break
 
                     if self._verbose:
-                        print 'Confidential Info Retrieved:'
-                        print self.skey, self.wxsid, self.wxuin, self.pass_ticket
+                        print ('Confidential Info Retrieved:')
+                        print (self.skey, self.wxsid, self.wxuin, self.pass_ticket)
 
                     data = {}
                     data['BaseRequest'] = {}
@@ -228,16 +236,16 @@ class WXBot(object):
                     self.init_info = response.json()
 
                     if not self.init_info['BaseResponse']['Ret'] == 0:
-                        print 'Failed to init with server. Retrying...'
+                        print ('Failed to init with server. Retrying...')
                         break
 
                     self.synckey = self.init_info['SyncKey']['List']
 
                     self.isLoggedIn = True
-                    print 'Logged In as ' + self.init_info['User']['NickName'].encode('raw_unicode_escape')
+                    print ('Logged In as ' + bytes(self.init_info['User']['NickName'], 'raw_unicode_escape').decode('utf8'))
                 else:
-                    print line
-                    print 'Login Failed, Retrying...'
+                    print (line)
+                    print ('Login Failed, Retrying...')
                     break
 
     # Public Functions
@@ -286,19 +294,21 @@ class WXBot(object):
 
         response = wxPost(self.session, self._hrefSendMessage.format(
             self.pass_ticket
-        ), payload=json.dumps(data).decode('raw_unicode_escape').encode('utf8'))
+        ), payload=json.dumps(data).encode('utf8').decode('raw_unicode_escape').encode('utf8'))
+
+
 
         if self._verbose:
-            print 'Message Sent'
+            print('Message Sent')
 
         resp = response.json()
 
-        print resp
+        print(resp)
         return resp
 
 
     def addListener(self, event, func):
-        if not self._listeners.has_key(event):
+        if not event in self._listeners:
             self._listeners[event] = []
         self._listeners[event].append(func)
 
@@ -307,14 +317,14 @@ def wxPost(session, url, data=None, retry=10, timeout=120, payload=None, verbose
     while not resp and retry > 0:
         try:
             if verbose:
-                print 'Request Post: {}'.format(url)
+                print ('Request Post: {}'.format(url))
 
             if data:
                 resp = session.post(url, json=data, timeout=timeout)
             else:
                 resp = session.post(url, data=payload, timeout=timeout)
         except Exception as e:
-            print e
+            print (e)
 
         retry -= 1
     return resp
@@ -324,17 +334,17 @@ def wxGet(session, url, retry=10, timeout=120,verbose=False):
     while not resp and retry > 0:
         try:
             if verbose:
-                print 'Request Get: {}'.format(url)
+                print ('Request Get: {}'.format(url))
             resp = session.get(url, timeout=timeout)
         except Exception as e:
-            print e
+            print (e)
 
         retry -= 1
     return resp
 
 
 if __name__ == '__main__':
-    print 'Runing from PyWX Module'
+    print ('Runing from PyWX Module')
     import sys
     reload(sys)
     sys.setdefaultencoding('utf-8')

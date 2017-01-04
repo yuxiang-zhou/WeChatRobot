@@ -1,0 +1,11 @@
+<div>
+  <div class='row'>
+    <div class='col-sm-12 text-center'>
+      <p ng-if='status==0'>Please scan QR code:</p>
+      <img ng-if='status==0' id='img_QR' ng-src="{{qrcode}}" style="width:400px;height:400px;border: 1px solid;" />
+
+      <p ng-if='status==1'>Please accept on your phone</p>
+      <img ng-if='status==1' id='img_avatar' ng-src="{{avatar}}" style="width:400px;height:400px;border: 1px solid;" />
+    </div>
+  </div>
+</div>

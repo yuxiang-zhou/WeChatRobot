@@ -1,7 +1,8 @@
 # coding=utf8
 
 from flask import Flask
-from flask_restful import Resource, Api
+from flask import render_template, send_file
+# from flask_restful import Resource, Api
 from pywx import WXBot
 import time
 import threading
@@ -9,7 +10,7 @@ import json
 import requests
 import urllib
 
-bot = WXBot()
+bot = WXBot(verbose=True)
 wechat_thread = None
 # helper functions
 def tulingReply(text, id=None):
@@ -40,14 +41,14 @@ def onMessage(msg):
     fromRemarkName = fromInfo['RemarkName'] if fromInfo else fromUser
     toRemarkName = toInfo['RemarkName'] if toInfo else toUser
 
-    print '({}) {}({}) - {}({}): {}'.format(
+    print ('({}) {}({}) - {}({}): {}'.format(
         msg['MsgType'],
-        fromNickName.encode('raw_unicode_escape'),
-        fromRemarkName.encode('raw_unicode_escape'),
-        toNickName.encode('raw_unicode_escape'),
-        toRemarkName.encode('raw_unicode_escape'),
-        msg['Content'].encode('raw_unicode_escape')
-    )
+        fromNickName.encode('raw_unicode_escape').decode('utf8'),
+        fromRemarkName.encode('raw_unicode_escape').decode('utf8'),
+        toNickName.encode('raw_unicode_escape').decode('utf8'),
+        toRemarkName.encode('raw_unicode_escape').decode('utf8'),
+        msg['Content'].encode('raw_unicode_escape').decode('utf8')
+    ))
 bot.addListener('onmessage',onMessage)
 
 
@@ -71,7 +72,7 @@ def onGFMessage(msg):
     toRemarkName = toInfo['RemarkName'] if toInfo else toUser
 
     def isMessageFromGroup():
-        if fromInfo.has_key('MemberList') and fromInfo['MemberList']:
+        if 'MemberList' in fromInfo and fromInfo['MemberList']:
             return True
         elif fromUser.count('@') > 1:
             return True
@@ -79,16 +80,16 @@ def onGFMessage(msg):
 
     if not isMessageFromGroup():
         if (
-            not autoReply.has_key(fromUser) or
-            (not autoReply[fromUser].has_key('replyed') and
+            not fromUser in autoReply or
+            (not 'replyed' in autoReply[fromUser] and
                 timestamp - autoReply[fromUser]['timestamp'] > reply_gap)):
             autoReply[fromUser] = {'replyed':True}
             if fromRemarkName.encode('raw_unicode_escape') == '老婆':
-                print 'Important Message!!!'
+                print ('Important Message!!!')
                 bot.sendMessage(fromUser, automsg)
             else:
                 bot.sendMessage(fromUser, '这里是Crystal-Alpha-1.0自动应答助手，主人暂时不在，有事请留言。')
-        elif (not autoReply[fromUser].has_key('timestamp') or
+        elif (not 'timestamp' in autoReply[fromUser] or
             timestamp - autoReply[fromUser]['timestamp'] > reply_gap) and not fromUser == bot.init_info['User']['UserName'] and not fromInfo['MemberList'] and fromUser.count('@') > 0:
             reply = tulingReply(content,fromUser)
             bot.sendMessage(fromUser, 'Crystal自动应答:{}'.format(reply['text'].encode('utf8')))
@@ -124,35 +125,12 @@ def onGFMessage(msg):
     if msgtype == 51:
         autoReply[toUser] = {'timestamp':timestamp}
 
-bot.addListener('onmessage',onGFMessage)
+# bot.addListener('onmessage',onGFMessage)
+
+app = Flask(__name__)
 
 
 # RESTful API configuration
-app = Flask(__name__)
-api = Api(app)
-
-class MessageHandler(Resource):
-    def get(self, fromUser, toUser, content, type):
-        content = urllib.unquote_plus(urllib.unquote_plus(content))
-
-        fromInfo = bot.getUserInfo(fromUser)
-        toInfo = bot.getUserInfo(toUser)
-        fromNickName = fromInfo['NickName'] if fromInfo else fromUser
-        toNickName = toInfo['NickName'] if toInfo else toUser
-        ifReply = False
-        strReply = ''
-
-        return {
-            'type': type,
-            'from': fromNickName,
-            'to': toNickName,
-            'content': content,
-            'ifReply': ifReply,
-            'reply': strReply
-        }
-
-api.add_resource(MessageHandler, '/api/msg/<string:fromUser>/<string:toUser>/<string:content>/<string:type>')
-
 @app.route('/api/start')
 def startWechat():
     if not wechat_thread.isAlive():
@@ -161,9 +139,21 @@ def startWechat():
     else:
         return 'Bot Started Already'
 
-@app.route('/api/status')
+@app.route('/api/init_info')
 def statusWechat():
     return json.dumps(bot.init_info)
+
+@app.route('/api/loginstatus')
+def loginStatusWechat():
+    data = {}
+    data['login'] = bot.isLoggedIn
+    data['status'] = bot.status
+    data['avatar'] = bot.avatar
+    return json.dumps(data)
+
+@app.route('/api/qr')
+def qrWechat():
+    return bot.hrefQR
 
 @app.route('/api/replystatus')
 def replystatusWechat():
@@ -177,6 +167,12 @@ def contactsWechat():
 def sendtestWechat():
     json.dumps(bot.sendMessage('filehelper','测试'))
     return 'test'
+
+# UI configuration
+
+@app.route('/')
+def index():
+    return send_file('templates/index.html')
 
 if __name__ == '__main__':
     if not wechat_thread:
